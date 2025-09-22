@@ -343,7 +343,8 @@ private:
                         }
                         connection_check_state_ = ConnectionCheckState::CLEANUP;
                     }
-                } else if (now - connection_check_start_time_ > 500) {
+                    // Change connection check timeout from 500ms to 2000ms
+                } else if (now - connection_check_start_time_ > 2000) {  // 2 seconds instead of 500ms
                     // Timeout after 500ms
                     ESP_LOGV(TAG, "Connection check timeout");
                     connection_check_success_ = false;
@@ -443,10 +444,10 @@ private:
         int flags = ::fcntl(sock, F_GETFL, 0);
         ::fcntl(sock, F_SETFL, flags | O_NONBLOCK);
 
-        // Very short timeouts for data operations
+        // Change from 100ms to 2000ms
         struct timeval timeout;
-        timeout.tv_sec = 0;
-        timeout.tv_usec = 100000;  // 100ms timeout - even shorter
+        timeout.tv_sec = 2;        // 2 seconds instead of 0
+        timeout.tv_usec = 0;       // 0 microseconds instead of 100000
         ::setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
         ::setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
 
@@ -474,8 +475,10 @@ private:
                 FD_SET(sock, &write_fds);
                 
                 struct timeval connect_timeout;
-                connect_timeout.tv_sec = 0;
-                connect_timeout.tv_usec = 100000;  // 100ms max wait - very short
+                // And for connection timeout:
+                connect_timeout.tv_sec = 2;     // 2 seconds instead of 0
+                connect_timeout.tv_usec = 0;    // 0 instead of 100000 
+                // 100ms max wait - very short (changed to 2 sec)
                 
                 int select_result = ::select(sock + 1, nullptr, &write_fds, nullptr, &connect_timeout);
                 if (select_result <= 0) {
