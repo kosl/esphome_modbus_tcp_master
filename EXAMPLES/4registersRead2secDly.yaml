@@ -1,0 +1,170 @@
+esphome:
+  name: modbus-test
+  friendly_name: modbus_test
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+external_components:
+  - source: github://Gucioo/esphome_modbus_tcp_master@slow-improved
+    components: [modbus_tcp_manager]
+    refresh: 0s  # Always use latest version during development
+
+# Enable logging
+logger:
+
+# Enable Home Assistant API
+api:
+
+ota:
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+
+captive_portal:
+
+
+# Example configuration for slow devices
+modbus_tcp_manager:
+  id: slow_modbus_device
+  host: "192.168.1.124"
+  port: 502
+  unit_id: 1
+  connection_timeout: 10s    # Wait up to 10s for TCP connection
+  read_timeout: 3s          # Wait up to 3s for Modbus response
+
+# DON'T use the modbus_tcp_manager binary_sensor platform - use template instead
+# This avoids the compilation error
+
+# Connection status using template (avoids compilation issues)
+binary_sensor:
+  - platform: template
+    name: "Modbus Connection"
+    id: modbus_connection
+    device_class: connectivity
+    lambda: |-
+      auto *modbus = id(slow_modbus_device);
+      return (modbus != nullptr) && modbus->is_connected();
+
+# Option 4: Text sensor showing all register values
+text_sensor:
+  - platform: template
+    name: "Registers 37000-37003"
+    id: all_registers_status
+    update_interval: 5s
+    lambda: |-
+      auto *modbus = id(slow_modbus_device);
+      if (modbus == nullptr) {
+        return {"ERROR: Modbus component not found"};
+      }
+      
+      if (!modbus->is_connected()) {
+        return {"Modbus Offline - Device not responding"};
+      }
+      
+      ESP_LOGI("registers", "Reading registers 37000-37003...");
+      
+      // Read 4 registers starting from 37000
+      auto response = modbus->read_registers(37000, 4, esphome::modbus_tcp::ModbusFunction::READ_HOLDING_REGISTERS);
+      
+      if (!response.success) {
+        ESP_LOGW("registers", "Read failed: %s", response.error_message.c_str());
+        return {"Read Failed: " + response.error_message};
+      }
+      
+      if (response.data.size() != 4) {
+        ESP_LOGW("registers", "Expected 4 registers, got %d", response.data.size());
+        return {"ERROR: Got " + to_string(response.data.size()) + " registers instead of 4"};
+      }
+      
+      // Convert to signed integers (if your device uses signed values)
+      int16_t reg_37000 = static_cast<int16_t>(response.data[0]);
+      int16_t reg_37001 = static_cast<int16_t>(response.data[1]);
+      int16_t reg_37002 = static_cast<int16_t>(response.data[2]);
+      int16_t reg_37003 = static_cast<int16_t>(response.data[3]);
+      
+      // Log the raw values
+      ESP_LOGI("registers", "Raw values - 37000:%d, 37001:%d, 37002:%d, 37003:%d", 
+               reg_37000, reg_37001, reg_37002, reg_37003);
+      
+      // Format the response string
+      std::string result = "37000:" + to_string(reg_37000) + 
+                          " 37001:" + to_string(reg_37001) + 
+                          " 37002:" + to_string(reg_37002) + 
+                          " 37003:" + to_string(reg_37003);
+      
+      return {result};
+
+# Individual sensors for each register (updated via interval)
+sensor:
+  - platform: template
+    name: "Register 37000"
+    id: reg_37000_sensor
+    unit_of_measurement: ""
+    accuracy_decimals: 0
+    
+  - platform: template
+    name: "Register 37001"
+    id: reg_37001_sensor
+    unit_of_measurement: ""
+    accuracy_decimals: 0
+    
+  - platform: template
+    name: "Register 37002"
+    id: reg_37002_sensor
+    unit_of_measurement: ""
+    accuracy_decimals: 0
+    
+  - platform: template
+    name: "Register 37003"
+    id: reg_37003_sensor
+    unit_of_measurement: ""
+    accuracy_decimals: 0
+# Use only the sensor platform from modbus_tcp_manager, not binary_sensor
+# This should work without compilation issues
+
+  - platform: modbus_tcp_manager
+    modbus_tcp_id: slow_modbus_device
+    name: "Test Single Register"
+    register_address: 37000
+    function_code: 3
+    scale: 1.0
+    update_interval: 30s
+    unit_of_measurement: ""
+
+# Bulk read interval - updates individual sensors efficiently
+interval:
+  - interval: 5s
+    then:
+      - lambda: |-
+          auto *modbus = id(slow_modbus_device);
+          if (modbus == nullptr || !modbus->is_connected()) {
+            ESP_LOGW("bulk_update", "Modbus not available");
+            return;
+          }
+          
+          ESP_LOGI("bulk_update", "Bulk reading registers 37000-37003");
+          
+          auto response = modbus->read_registers(37000, 4, esphome::modbus_tcp::ModbusFunction::READ_HOLDING_REGISTERS);
+          
+          if (response.success && response.data.size() == 4) {
+            // Update individual sensors
+            id(reg_37000_sensor).publish_state(static_cast<int16_t>(response.data[0]));
+            id(reg_37001_sensor).publish_state(static_cast<int16_t>(response.data[1]));
+            id(reg_37002_sensor).publish_state(static_cast<int16_t>(response.data[2]));
+            id(reg_37003_sensor).publish_state(static_cast<int16_t>(response.data[3]));
+            
+            ESP_LOGI("bulk_update", "Updated sensors: %d, %d, %d, %d", 
+                     static_cast<int16_t>(response.data[0]),
+                     static_cast<int16_t>(response.data[1]),
+                     static_cast<int16_t>(response.data[2]),
+                     static_cast<int16_t>(response.data[3]));
+          } else {
+            ESP_LOGW("bulk_update", "Bulk read failed: %s", response.error_message.c_str());
+          }
