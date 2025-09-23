@@ -2,7 +2,6 @@
 
 #include "esphome/core/component.h"
 #include "esphome/components/sensor/sensor.h"
-#include "esphome/components/binary_sensor/binary_sensor.h"
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
 #include <string>
@@ -343,9 +342,8 @@ private:
                         }
                         connection_check_state_ = ConnectionCheckState::CLEANUP;
                     }
-                    // Change connection check timeout from 500ms to 2000ms
-                } else if (now - connection_check_start_time_ > 2000) {  // 2 seconds instead of 500ms
-                    // Timeout after 500ms
+                } else if (now - connection_check_start_time_ > 2000) {
+                    // Timeout after 2 seconds
                     ESP_LOGV(TAG, "Connection check timeout");
                     connection_check_success_ = false;
                     connection_check_state_ = ConnectionCheckState::CLEANUP;
@@ -444,10 +442,10 @@ private:
         int flags = ::fcntl(sock, F_GETFL, 0);
         ::fcntl(sock, F_SETFL, flags | O_NONBLOCK);
 
-        // Change from 100ms to 2000ms
+        // Longer timeouts for better reliability
         struct timeval timeout;
-        timeout.tv_sec = 2;        // 2 seconds instead of 0
-        timeout.tv_usec = 0;       // 0 microseconds instead of 100000
+        timeout.tv_sec = 2;
+        timeout.tv_usec = 0;
         ::setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
         ::setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
 
@@ -475,10 +473,8 @@ private:
                 FD_SET(sock, &write_fds);
                 
                 struct timeval connect_timeout;
-                // And for connection timeout:
-                connect_timeout.tv_sec = 2;     // 2 seconds instead of 0
-                connect_timeout.tv_usec = 0;    // 0 instead of 100000 
-                // 100ms max wait - very short (changed to 2 sec)
+                connect_timeout.tv_sec = 2;
+                connect_timeout.tv_usec = 0;
                 
                 int select_result = ::select(sock + 1, nullptr, &write_fds, nullptr, &connect_timeout);
                 if (select_result <= 0) {
@@ -615,6 +611,11 @@ private:
     }
 };
 
+// Forward declaration for binary_sensor::BinarySensor
+namespace binary_sensor {
+    class BinarySensor;
+}
+
 // Sensor class
 class ModbusTCPSensor : public PollingComponent, public sensor::Sensor {
 public:
@@ -679,26 +680,8 @@ private:
     float offset_;
 };
 
-// Connection status sensor
-class ModbusTCPConnectionSensor : public PollingComponent, public binary_sensor::BinarySensor {
-public:
-    ModbusTCPConnectionSensor(ModbusTCPManager *parent) : parent_(parent) {
-        this->set_update_interval(1000);  // Check every 1 second for faster response
-    }
-
-    void setup() override {
-        ESP_LOGD(TAG, "Setting up Modbus connection status sensor");
-    }
-
-    void update() override {
-        bool connected = parent_->is_connected();
-        this->publish_state(connected);
-        ESP_LOGV(TAG, "Modbus connection status: %s", connected ? "Connected" : "Disconnected");
-    }
-
-private:
-    ModbusTCPManager *parent_;
-};
+// Connection status sensor - separate class that gets defined in binary_sensor.cpp
+class ModbusTCPConnectionSensor;
 
 }  // namespace modbus_tcp
 }  // namespace esphome
