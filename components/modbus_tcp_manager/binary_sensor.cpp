@@ -1,8 +1,18 @@
-#include "modbus_tcp_manager.h"
+#include "esphome/core/component.h"
 #include "esphome/components/binary_sensor/binary_sensor.h"
+#include "esphome/core/log.h"
+#include <string>
 
 namespace esphome {
 namespace modbus_tcp {
+
+static const char *const TAG = "modbus_tcp_manager";
+
+// Forward declaration of the main manager class
+class ModbusTCPManager {
+public:
+    bool is_connected() const;
+};
 
 // Connection status sensor implementation
 class ModbusTCPConnectionSensor : public PollingComponent, public binary_sensor::BinarySensor {
