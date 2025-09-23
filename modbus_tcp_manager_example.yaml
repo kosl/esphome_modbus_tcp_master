@@ -1,5 +1,5 @@
 esphome:
-  name: thermostat-pid-complete
+  name: slow-modbus-test
   platform: ESP32
   board: esp32dev
 
@@ -8,7 +8,6 @@ wifi:
   password: "your_password"
   fast_connect: true
   power_save_mode: none
-  reboot_timeout: 0s
 
 logger:
   level: DEBUG
@@ -16,97 +15,73 @@ logger:
     modbus_tcp_manager: DEBUG
 
 api:
-  encryption:
-    key: "your_api_key"
-  reboot_timeout: 0s
-
 ota:
-  password: "your_ota_password"
-
-esp32:
-  board: esp32dev
-  framework:
-    type: esp-idf
 
 external_components:
-  - source: github://Gucioo/esphome_modbus_tcp_master
+  - source: github://yourusername/esphome_modbus_tcp_master@improved  # Your improved fork
     components: [modbus_tcp_manager]
     refresh: 0s
 
+# Modbus manager with slow device configuration
 modbus_tcp_manager:
-  id: modbus_device
-  host: "192.168.0.3"
+  id: slow_modbus_device
+  host: "192.168.1.124"
   port: 502
   unit_id: 1
+  # Extended timeouts for slow devices (up to 10 seconds)
+  connection_timeout: 10s      # Time to wait for TCP connection
+  read_timeout: 10s            # Time to wait for Modbus response
+  
+  # Optional: Watchdog for device health monitoring
+  # watchdog_register: 999
+  # watchdog_interval: 30s     # Longer interval for slow devices
+  
+  # Optional: Safe mode values if connection fails
+  # safe_mode_registers:
+  #   - register: 100
+  #     value: 0              # Safe value when connection lost
 
+# Connection status monitoring
 binary_sensor:
   - platform: modbus_tcp_manager
-    modbus_tcp_id: modbus_device
-    name: "Modbus Connection"
+    modbus_tcp_id: slow_modbus_device
+    name: "Slow Modbus Connection"
     id: modbus_connection
     device_class: connectivity
 
 sensor:
+  # Read one sensor every 15 seconds (plenty of time for slow response)
   - platform: modbus_tcp_manager
-    modbus_tcp_id: modbus_device
-    name: "AI1 Temperature"
-    id: ai1_temp
-    register_address: 0
-    function_code: 4
-    scale: 0.1
-    update_interval: 5s  # Slower to reduce OpenTherm interference
-    unit_of_measurement: "°C"
-    device_class: "temperature"
-    accuracy_decimals: 1
-
-  - platform: modbus_tcp_manager
-    modbus_tcp_id: modbus_device
-    name: "AM64 Temperature"
-    id: am64_temp
-    register_address: 591
+    modbus_tcp_id: slow_modbus_device
+    name: "Slow Temperature"
+    register_address: 37000
     function_code: 3
     scale: 0.1
-    update_interval: 7s  # Staggered timing
+    update_interval: 15s       # Longer interval for slow devices
     unit_of_measurement: "°C"
     device_class: "temperature"
     accuracy_decimals: 1
 
-  - platform: dallas
-    name: "Local Boiler Temperature"
-    id: local_boiler_temp
-    address: 0x1C0000031EDD2A28
-    update_interval: 3s  # Slower updates
-    unit_of_measurement: "°C"
-    device_class: "temperature"
-    accuracy_decimals: 1
-    on_value:
-      then:
-        - if:
-            condition:
-              and:
-                - binary_sensor.is_on: modbus_connection
-                - lambda: 'return !isnan(x);'
-            then:
-              - delay: 100ms  # Small delay before Modbus write
-              - lambda: |-
-                  auto *modbus = id(modbus_device);
-                  if (modbus != nullptr) {
-                    int16_t scaled_value = (int16_t)(x * 10);
-                    bool success = modbus->write_register(501, scaled_value);
-                    if (success) {
-                      ESP_LOGI("main", "Wrote boiler temp: %.1f°C", x);
-                    } else {
-                      ESP_LOGW("main", "Failed to write boiler temp");
-                    }
-                  }
+  # Another sensor with staggered timing
+  - platform: modbus_tcp_manager
+    modbus_tcp_id: slow_modbus_device
+    name: "Slow Pressure"
+    register_address: 37001
+    function_code: 3
+    scale: 0.01
+    update_interval: 20s       # Offset timing to prevent conflicts
+    unit_of_measurement: "bar"
+    device_class: "pressure"
+    accuracy_decimals: 2
 
+# Manual control for slow device
 number:
   - platform: template
-    name: "Boiler Setpoint"
-    id: boiler_setpoint
-    min_value: 10
-    max_value: 80
-    step: 0.5
+    name: "Slow Device Setpoint"
+    id: slow_setpoint
+    min_value: 0
+    max_value: 100
+    step: 0.1
     optimistic: true
     unit_of_measurement: "°C"
     set_action:
@@ -116,124 +91,38 @@ number:
               binary_sensor.is_on: modbus_connection
             then:
               - lambda: |-
-                  auto *modbus = id(modbus_device);
+                  auto *modbus = id(slow_modbus_device);
                   if (modbus != nullptr) {
                     int16_t scaled_value = (int16_t)(x * 10);
-                    bool success = modbus->write_register(502, scaled_value);
+                    bool success = modbus->write_register(37100, scaled_value);
                     if (success) {
-                      ESP_LOGI("main", "Set setpoint: %.1f°C", x);
+                      ESP_LOGI("main", "Set slow device setpoint: %.1f°C", x);
                     } else {
-                      ESP_LOGW("main", "Failed to write setpoint");
+                      ESP_LOGW("main", "Failed to write to slow device");
                     }
                   }
             else:
-              - logger.log: "Cannot write setpoint - Modbus offline"
+              - logger.log: "Cannot write - Slow Modbus offline"
 
-  - platform: template
-    name: "System Mode"
-    id: system_mode
-    min_value: 0
-    max_value: 5
-    step: 1
-    optimistic: true
-    set_action:
-      then:
-        - if:
-            condition:
-              binary_sensor.is_on: modbus_connection
-            then:
-              - lambda: |-
-                  auto *modbus = id(modbus_device);
-                  if (modbus != nullptr) {
-                    int16_t mode_value = (int16_t)x;
-                    bool success = modbus->write_register(503, mode_value);
-                    if (success) {
-                      ESP_LOGI("main", "Set mode: %d", mode_value);
-                    } else {
-                      ESP_LOGW("main", "Failed to write mode");
-                    }
-                  }
-
-switch:
-  - platform: template
-    name: "Boiler Enable"
-    id: boiler_enable
-    optimistic: true
-    turn_on_action:
-      - if:
-          condition:
-            binary_sensor.is_on: modbus_connection
-          then:
-            - lambda: |-
-                auto *modbus = id(modbus_device);
-                if (modbus != nullptr) {
-                  bool success = modbus->write_register(504, 1);
-                  if (success) {
-                    ESP_LOGI("main", "Boiler ON");
-                  } else {
-                    ESP_LOGW("main", "Failed to turn on boiler");
-                  }
-                }
-          else:
-            - logger.log: "Cannot turn on - Modbus offline"
-    turn_off_action:
-      - lambda: |-
-          auto *modbus = id(modbus_device);
-          if (modbus != nullptr) {
-            bool success = modbus->write_register(504, 0);
-            if (success) {
-              ESP_LOGI("main", "Boiler OFF");
-            } else {
-              ESP_LOGW("main", "Failed to turn off boiler");
-            }
-          }
-
+# System status
 text_sensor:
   - platform: template
-    name: "System Status"
-    id: system_status
-    update_interval: 5s
+    name: "Slow Device Status"
+    update_interval: 30s
     lambda: |-
       if (!id(modbus_connection).state) {
-        return {"Modbus Offline"};
-      } else if (isnan(id(ai1_temp).state) && isnan(id(am64_temp).state)) {
-        return {"No Data"};
-      } else if (id(boiler_enable).state) {
-        return {"Running - " + to_string(id(boiler_setpoint).state) + "°C"};
+        return {"Offline - Device not responding"};
+      } else if (isnan(id(slow_temperature).state)) {
+        return {"Connected - No data yet"};
       } else {
-        return {"Standby"};
+        return {"Online - " + to_string(id(slow_temperature).state) + "°C"};
       }
 
-button:
-  - platform: template
-    name: "Send Settings"
-    on_press:
-      then:
-        - if:
-            condition:
-              binary_sensor.is_on: modbus_connection
-            then:
-              - lambda: |-
-                  auto *modbus = id(modbus_device);
-                  if (modbus != nullptr) {
-                    std::vector<int16_t> values = {
-                      (int16_t)(id(boiler_setpoint).state * 10),
-                      id(boiler_enable).state ? 1 : 0
-                    };
-                    bool success = modbus->write_registers(600, values);
-                    if (success) {
-                      ESP_LOGI("main", "Bulk write OK");
-                    } else {
-                      ESP_LOGW("main", "Bulk write failed");
-                    }
-                  }
-            else:
-              - logger.log: "Cannot send - Modbus offline"
-
+# Health monitoring
 interval:
-  - interval: 10s
+  - interval: 60s  # Less frequent for slow devices
     then:
       - lambda: |-
-          ESP_LOGI("health", "ESP32 OK | Heap: %d | Modbus: %s", 
+          ESP_LOGI("health", "ESP32 OK | Heap: %d | Slow Modbus: %s", 
                    esp_get_free_heap_size(),
                    id(modbus_connection).state ? "OK" : "OFFLINE");
