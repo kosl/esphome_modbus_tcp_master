@@ -8,7 +8,7 @@ esp32:
     type: esp-idf
 
 external_components:
-  - source: github://Gucioo/esphome_modbus_tcp_master@slow-improved
+  - source: github://Gucioo/esphome_modbus_tcp_master@slow-async # Faster working version
     components: [modbus_tcp_manager]
     refresh: 0s  # Always use latest version during development
 
@@ -35,10 +35,10 @@ modbus_tcp_manager:
   host: "192.168.1.124"
   port: 502
   unit_id: 1
-  connection_timeout: 10s
+  connection_timeout: 3s
   read_timeout: 3s
 
-# Template binary sensor (no component.update needed)
+# Connection status
 binary_sensor:
   - platform: template
     name: "Modbus Connection"
@@ -48,42 +48,7 @@ binary_sensor:
       auto *modbus = id(slow_modbus_device);
       return (modbus != nullptr) && modbus->is_connected();
 
-text_sensor:
-  - platform: template
-    name: "Registers 37000-37003"
-    id: all_registers_status
-    update_interval: 10s
-    lambda: |-
-      auto *modbus = id(slow_modbus_device);
-      if (modbus == nullptr || !modbus->is_connected()) {
-        return {"Modbus Offline"};
-      }
-      
-      // Using the async API (non-blocking)
-      std::string result = "Reading...";
-      
-      modbus->read_registers_async(37000, 4, 
-        esphome::modbus_tcp::ModbusFunction::READ_HOLDING_REGISTERS,
-        [&result](const esphome::modbus_tcp::ModbusResponse& response) {
-          if (response.success && response.data.size() == 4) {
-            int16_t r0 = static_cast<int16_t>(response.data[0]);
-            int16_t r1 = static_cast<int16_t>(response.data[1]);
-            int16_t r2 = static_cast<int16_t>(response.data[2]);
-            int16_t r3 = static_cast<int16_t>(response.data[3]);
-            
-            result = "37000:" + to_string(r0) + " 37001:" + to_string(r1) + 
-                    " 37002:" + to_string(r2) + " 37003:" + to_string(r3);
-            
-            // Update the sensor from callback
-            id(all_registers_status).publish_state(result);
-          } else {
-            result = "Read Failed: " + response.error_message;
-            id(all_registers_status).publish_state(result);
-          }
-        });
-      
-      return {result};
-
+# Individual sensors updated by async callbacks
 sensor:
   - platform: template
     name: "Register 37000"
@@ -109,42 +74,72 @@ sensor:
     unit_of_measurement: ""
     accuracy_decimals: 0
 
-# Use interval for async bulk updates
+# Text sensor showing all values
+text_sensor:
+  - platform: template
+    name: "Registers 37000-37003"
+    id: all_registers_status
+    lambda: |-
+      return {"Async operations active"};
+
+# **TRUE ASYNC**: 5-second interval with instant return
 interval:
-  - interval: 15s
+  - interval: 5s  # Your requested 5-second updates!
     then:
       - lambda: |-
           auto *modbus = id(slow_modbus_device);
           if (modbus == nullptr || !modbus->is_connected()) {
+            ESP_LOGD("async", "Modbus not connected");
             return;
           }
           
-          ESP_LOGI("bulk", "Starting async bulk read...");
+          ESP_LOGI("async", "Starting 5-second async read (returns instantly!)");
           
-          // Async read - returns immediately, doesn't block ESPHome
+          // **CRITICAL**: This call returns IMMEDIATELY - no blocking!
           modbus->read_registers_async(37000, 4, 
             esphome::modbus_tcp::ModbusFunction::READ_HOLDING_REGISTERS,
             [](const esphome::modbus_tcp::ModbusResponse& response) {
+              // This callback runs when data arrives (maybe 3 seconds later)
               if (response.success && response.data.size() == 4) {
+                // Update all sensors from callback
                 id(reg_37000_sensor).publish_state(static_cast<int16_t>(response.data[0]));
                 id(reg_37001_sensor).publish_state(static_cast<int16_t>(response.data[1]));
                 id(reg_37002_sensor).publish_state(static_cast<int16_t>(response.data[2]));
                 id(reg_37003_sensor).publish_state(static_cast<int16_t>(response.data[3]));
                 
-                ESP_LOGI("bulk", "Async bulk read completed successfully");
+                // Update text sensor too
+                std::string result = "37000:" + to_string(static_cast<int16_t>(response.data[0])) + 
+                                   " 37001:" + to_string(static_cast<int16_t>(response.data[1])) + 
+                                   " 37002:" + to_string(static_cast<int16_t>(response.data[2])) + 
+                                   " 37003:" + to_string(static_cast<int16_t>(response.data[3]));
+                id(all_registers_status).publish_state(result);
+                
+                ESP_LOGI("async", "5-second async read completed: %s", result.c_str());
               } else {
-                ESP_LOGW("bulk", "Async bulk read failed: %s", response.error_message.c_str());
+                ESP_LOGW("async", "5-second async read failed: %s", response.error_message.c_str());
+                id(all_registers_status).publish_state("Read Failed: " + response.error_message);
               }
             });
+          
+          // **EXECUTION CONTINUES HERE IMMEDIATELY**
+          // ESPHome is free to do other things while Modbus works in background
+          ESP_LOGI("async", "Async request queued - ESPHome continues running!");
 
-# Update connection status periodically (using lambda, not component.update)
-  - interval: 5s
+  # Connection status update
+  - interval: 10s
     then:
       - lambda: |-
-          // Manually trigger template binary sensor update
           auto *connection_sensor = id(modbus_connection);
-          if (connection_sensor != nullptr) {
-            auto *modbus = id(slow_modbus_device);
-            bool connected = (modbus != nullptr) && modbus->is_connected();
+          auto *modbus = id(slow_modbus_device);
+          if (connection_sensor && modbus) {
+            bool connected = modbus->is_connected();
             connection_sensor->publish_state(connected);
           }
+
+  # Health monitoring (without WiFi check to avoid compilation issues)
+  - interval: 30s
+    then:
+      - lambda: |-
+          ESP_LOGI("health", "System Health: Heap=%d Modbus=%s", 
+                   esp_get_free_heap_size(),
+                   id(slow_modbus_device)->is_connected() ? "OK" : "FAIL");
