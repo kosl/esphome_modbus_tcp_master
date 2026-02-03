@@ -265,7 +265,7 @@ private:
                 break;
             }
 	    p6 = micros() - start;
-	    if (p7 > 1000) {
+	    if (p6 > 1000) {
 	      ESP_LOGW(TAG, "process_connection_state_machine() took too long (%d, %d, %d, %d, %d, %d)",
 		       p1, p2, p3, p4, p5, p6);
 	    }
