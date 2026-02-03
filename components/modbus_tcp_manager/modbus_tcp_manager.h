@@ -75,6 +75,7 @@ public:
     void loop() override {
         uint32_t now = millis();
         uint32_t loop_start = micros();
+	uint32_t p1, p2, p3, p4;
         
         // **CRITICAL**: Yield frequently to prevent WiFi starvation
         if (++loop_counter_ >= 5) {  // Yield every 5 loops instead of 10
@@ -90,23 +91,24 @@ public:
         }
         
         // Process connection state machine (max 1ms per call)
-        if ((micros() - loop_start) < 1000) {
+        if ((p1=(micros() - loop_start)) < 1000) {
             process_connection_state_machine();
         }
         
         // Process pending requests (max 1ms per call)
-        if ((micros() - loop_start) < 2000) {
+        if ((p2=(micros() - loop_start)) < 2000) {
             process_pending_requests();
         }
         
         // Cleanup timeouts (max 500μs per call)
-        if ((micros() - loop_start) < 2500) {
+        if ((p3=(micros() - loop_start)) < 2500) {
             cleanup_timeouts();
         }
         
         // **CRITICAL**: Total loop time must be under 3ms
-        if ((micros() - loop_start) > 3000) {
-            ESP_LOGW(TAG, "Loop took too long: %d μs", (micros() - loop_start));
+        if ((p4=(micros() - loop_start)) > 3000) {
+            ESP_LOGW(TAG, "Loop took too long: %d μs (%d, %d, %d, %d)",
+		     (micros() - loop_start), p1, p2, p3, p4);
         }
     }
 
