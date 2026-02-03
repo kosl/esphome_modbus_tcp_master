@@ -226,8 +226,6 @@ private:
     // **ULTRA-FAST**: Connection state machine (max 1ms)
     void process_connection_state_machine() {
         uint32_t now = millis();
-        uint32_t start = micros();
-        uint32_t p1, p2, p3, p4, p5, p6;
 
         switch (connection_state_) {
             case ConnectionState::DISCONNECTED: {
@@ -238,37 +236,27 @@ private:
                 }
                 break;
             }
-            p1 = micros() - start;
             case ConnectionState::CONNECTING: {
                 check_connection_progress();
                 break;
             }
-            p2 = micros() - start;
             case ConnectionState::CONNECTED: {
                 is_connected_ = true;
                 break;
             }
-	    p3 = micros() - start;
             case ConnectionState::SENDING: {
                 continue_sending();
                 break;
             }
-	    p4 = micros() - start;
             case ConnectionState::RECEIVING: {
                 continue_receiving();
                 break;
             }
-	    p5 = micros() - start;
             case ConnectionState::ERROR_RECOVERY: {
                 close_connection();
                 connection_state_ = ConnectionState::DISCONNECTED;
                 break;
             }
-	    p6 = micros() - start;
-	    if (p6 > 1000) {
-	      ESP_LOGW(TAG, "process_connection_state_machine() took too long (%d, %d, %d, %d, %d, %d)",
-		       p1, p2, p3, p4, p5, p6);
-	    }
         }
     }
 
@@ -425,7 +413,7 @@ private:
     }
 
     void continue_receiving() {
-        uint8_t buffer[64];  // Smaller buffer for faster processing
+        uint8_t buffer[32];  // Smaller buffer for faster processing
         int received = ::recv(socket_, buffer, sizeof(buffer), MSG_DONTWAIT);
         
         if (received > 0) {
